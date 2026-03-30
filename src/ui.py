@@ -1,87 +1,227 @@
 
-import tkinter as tk
-from tkinter import ttk, messagebox
-from algorithm import GradientAlgorithm
+"""
+Module ui - Interface utilisateur
+--------------------------------
+Contient l'interface graphique avec tkinter pour l'application.
+"""
 
-class GradientProjeteApp:
+import tkinter as tk
+from tkinter import ttk, scrolledtext, messagebox, filedialog
+import numpy as np
+from src.algorithm import ProblemeLineaire
+
+
+class ApplicationGradientProjete:
+    """Application principale avec interface Tkinter"""
+    
     def __init__(self, root):
         self.root = root
-        self.root.title("Algorithme du Gradient Projeté")
-        self.root.geometry("800x700")
+        self.root.title("Optimisation Linéaire - Méthode du Gradient Projeté")
+        self.root.geometry("1100x850")
         
-        self.algorithm = GradientAlgorithm()
+        self.probleme = ProblemeLineaire()
+        self.creer_interface()
+    
+    def creer_interface(self):
+        """Crée tous les éléments de l'interface"""
+        # Style
+        style = ttk.Style()
+        style.theme_use('clam')
         
-        self.setup_ui()
-
-    # ---------------- UI Setup ----------------
-    def setup_ui(self):
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        # Notebook pour organiser les onglets
+        notebook = ttk.Notebook(self.root)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        ttk.Label(main_frame, text="Fonction objectif f(x,y):").grid(row=0, column=0, sticky=tk.W)
-        self.f_entry = ttk.Entry(main_frame, width=30)
-        self.f_entry.grid(row=0, column=1, padx=5)
-        self.f_entry.insert(0, "x**2 + y**2")
+        # Onglet 1: Saisie du problème
+        cadre_saisie = ttk.Frame(notebook)
+        notebook.add(cadre_saisie, text="📝 Saisie du problème")
+        self.creer_onglet_saisie(cadre_saisie)
         
-        ttk.Label(main_frame, text="Gradient df/dx, df/dy (vide=auto):").grid(row=1, column=0, sticky=tk.W)
-        self.grad_entry = ttk.Entry(main_frame, width=30)
-        self.grad_entry.grid(row=1, column=1, padx=5)
-        self.grad_entry.insert(0, "2*x, 2*y")
+        # Onglet 2: Paramètres et résolution
+        cadre_resolution = ttk.Frame(notebook)
+        notebook.add(cadre_resolution, text="⚙️ Paramètres et résolution")
+        self.creer_onglet_resolution(cadre_resolution)
         
-        ttk.Label(main_frame, text="Contraintes (une par ligne):").grid(row=2, column=0, sticky=tk.W)
-        self.constraints_text = tk.Text(main_frame, width=40, height=5)
-        self.constraints_text.grid(row=2, column=1, padx=5)
-        self.constraints_text.insert("1.0", "x + y <= 2\nx >= 0\ny >= 0")
+        # Onglet 3: Résultats
+        cadre_resultats = ttk.Frame(notebook)
+        notebook.add(cadre_resultats, text="📊 Résultats")
+        self.creer_onglet_resultats(cadre_resultats)
+    
+    def creer_onglet_saisie(self, parent):
+        """Crée l'onglet de saisie du problème"""
+        # Cadre principal avec scrollbar
+        canvas = tk.Canvas(parent)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        cadre_scrollable = ttk.Frame(canvas)
         
-        ttk.Label(main_frame, text="Point initial x0,y0:").grid(row=3, column=0, sticky=tk.W)
-        self.x0_entry = ttk.Entry(main_frame, width=15)
-        self.x0_entry.grid(row=3, column=1, sticky=tk.W, padx=5)
-        self.x0_entry.insert(0, "1.0, 1.0")
+        cadre_scrollable.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=cadre_scrollable, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
         
-        ttk.Label(main_frame, text="Pas λ initial:").grid(row=4, column=0, sticky=tk.W)
-        self.lambda_entry = ttk.Entry(main_frame, width=10)
-        self.lambda_entry.grid(row=4, column=1, padx=5)
-        self.lambda_entry.insert(0, "0.1")
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
         
-        ttk.Label(main_frame, text="Max itérations:").grid(row=5, column=0, sticky=tk.W)
-        self.max_iter_entry = ttk.Entry(main_frame, width=10)
-        self.max_iter_entry.grid(row=5, column=1, padx=5)
-        self.max_iter_entry.insert(0, "100")
+        # Fonction objectif
+        ttk.Label(cadre_scrollable, text="FONCTION OBJECTIF (à maximiser)", 
+                 font=('Arial', 12, 'bold')).pack(anchor=tk.W, pady=(10,5))
         
-        ttk.Label(main_frame, text="Tolérance:").grid(row=6, column=0, sticky=tk.W)
-        self.tol_entry = ttk.Entry(main_frame, width=10)
-        self.tol_entry.grid(row=6, column=1, padx=5)
-        self.tol_entry.insert(0, "1e-6")
+        cadre_fo = ttk.Frame(cadre_scrollable)
+        cadre_fo.pack(fill=tk.X, pady=5)
         
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=7, column=0, columnspan=2, pady=10)
-        ttk.Button(button_frame, text="Exécuter", command=self.run_algorithm).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Réinitialiser", command=self.reset).pack(side=tk.LEFT, padx=5)
+        ttk.Label(cadre_fo, text="Expression:").pack(side=tk.LEFT, padx=5)
+        self.entree_objectif = ttk.Entry(cadre_fo, width=60)
+        self.entree_objectif.pack(side=tk.LEFT, padx=5)
+        self.entree_objectif.insert(0, "3*x1 + 2*x2")
         
-        self.result_text = tk.Text(main_frame, width=70, height=20)
-        self.result_text.grid(row=8, column=0, columnspan=2, pady=10)
-        scrollbar = tk.Scrollbar(main_frame, command=self.result_text.yview)
-        scrollbar.grid(row=8, column=2, sticky='ns')
-        self.result_text['yscrollcommand'] = scrollbar.set
-
-    # ---------------- Interaction ----------------
-    def run_algorithm(self):
-        self.algorithm.run_algorithm(
-            f_entry=self.f_entry,
-            grad_entry=self.grad_entry,
-            x0_entry=self.x0_entry,
-            lambda_entry=self.lambda_entry,
-            max_iter_entry=self.max_iter_entry,
-            tol_entry=self.tol_entry,
-            constraints_text=self.constraints_text,
-            result_text=self.result_text
-        )
-
-    def reset(self):
-        self.algorithm.reset_ui(
-            f_entry=self.f_entry,
-            grad_entry=self.grad_entry,
-            x0_entry=self.x0_entry,
-            constraints_text=self.constraints_text,
-            result_text=self.result_text
-        )
+        ttk.Label(cadre_scrollable, text="Exemple: 3*x1 + 2*x2 - x3", 
+                 foreground="gray").pack(anchor=tk.W, padx=10)
+        
+        # Point initial
+        ttk.Label(cadre_scrollable, text="POINT INITIAL", 
+                 font=('Arial', 12, 'bold')).pack(anchor=tk.W, pady=(15,5))
+        
+        cadre_pi = ttk.Frame(cadre_scrollable)
+        cadre_pi.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(cadre_pi, text="Coordonnées:").pack(side=tk.LEFT, padx=5)
+        self.entree_point_initial = ttk.Entry(cadre_pi, width=60)
+        self.entree_point_initial.pack(side=tk.LEFT, padx=5)
+        self.entree_point_initial.insert(0, "x1=0, x2=0")
+        
+        ttk.Label(cadre_scrollable, text="Format: 'x1=1, x2=2, x3=3' ou '1,2,3'", 
+                 foreground="gray").pack(anchor=tk.W, padx=10)
+        
+        # Gradient
+        ttk.Label(cadre_scrollable, text="GRADIENT (optionnel)", 
+                 font=('Arial', 12, 'bold')).pack(anchor=tk.W, pady=(15,5))
+        
+        cadre_grad = ttk.Frame(cadre_scrollable)
+        cadre_grad.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(cadre_grad, text="Expression:").pack(side=tk.LEFT, padx=5)
+        self.entree_gradient = ttk.Entry(cadre_grad, width=60)
+        self.entree_gradient.pack(side=tk.LEFT, padx=5)
+        self.entree_gradient.insert(0, "3, 2")
+        
+        ttk.Label(cadre_scrollable, text="Format: '3*x1 + 2*x2' ou '3, 2' (si laissé vide, calcul automatique)", 
+                 foreground="gray").pack(anchor=tk.W, padx=10)
+        
+        # Contraintes
+        ttk.Label(cadre_scrollable, text="CONTRAINTES", 
+                 font=('Arial', 12, 'bold')).pack(anchor=tk.W, pady=(15,5))
+        
+        self.texte_contraintes = scrolledtext.ScrolledText(cadre_scrollable, height=12, width=70)
+        self.texte_contraintes.pack(fill=tk.BOTH, expand=True, pady=5, padx=10)
+        self.texte_contraintes.insert(tk.END, "2*x1 + x2 ≤ 10\nx1 + 3*x2 ≤ 15\nx1 ≥ 0\nx2 ≥ 0")
+        
+        # Boutons pour les contraintes
+        cadre_boutons = ttk.Frame(cadre_scrollable)
+        cadre_boutons.pack(pady=10)
+        
+        ttk.Button(cadre_boutons, text="➕ Ajouter une contrainte", 
+                  command=self.ajouter_contrainte).pack(side=tk.LEFT, padx=5)
+        ttk.Button(cadre_boutons, text="🗑️ Effacer tout", 
+                  command=self.effacer_contraintes).pack(side=tk.LEFT, padx=5)
+        ttk.Button(cadre_boutons, text="📋 Charger exemple", 
+                  command=self.charger_exemple).pack(side=tk.LEFT, padx=5)
+    
+    def creer_onglet_resolution(self, parent):
+        """Crée l'onglet des paramètres de résolution"""
+        # Paramètres
+        cadre_param = ttk.LabelFrame(parent, text="Paramètres de résolution", padding=10)
+        cadre_param.pack(fill=tk.X, padx=20, pady=10)
+        
+        # Itérations
+        ttk.Label(cadre_param, text="Nombre maximum d'itérations:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.entree_iterations = ttk.Entry(cadre_param, width=15)
+        self.entree_iterations.grid(row=0, column=1, sticky=tk.W, pady=5, padx=10)
+        self.entree_iterations.insert(0, "1000")
+        
+        # Pas
+        ttk.Label(cadre_param, text="Pas initial:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.entree_pas = ttk.Entry(cadre_param, width=15)
+        self.entree_pas.grid(row=1, column=1, sticky=tk.W, pady=5, padx=10)
+        self.entree_pas.insert(0, "0.1")
+        
+        # Tolérance
+        ttk.Label(cadre_param, text="Tolérance de convergence:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.entree_tolerance = ttk.Entry(cadre_param, width=15)
+        self.entree_tolerance.grid(row=2, column=1, sticky=tk.W, pady=5, padx=10)
+        self.entree_tolerance.insert(0, "1e-6")
+        
+        # Option de recherche linéaire
+        self.backtracking_var = tk.BooleanVar()
+        ttk.Checkbutton(cadre_param, text="Utiliser la recherche linéaire (backtracking)", 
+                       variable=self.backtracking_var).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=5)
+        
+        # Bouton de résolution
+        ttk.Button(parent, text="🚀 LANCER LA RÉSOLUTION", 
+                  command=self.resoudre, style="Accent.TButton").pack(pady=30)
+        
+        # Barre de progression
+        self.progression = ttk.Progressbar(parent, mode='indeterminate')
+        self.progression.pack(fill=tk.X, padx=20, pady=10)
+        
+        # Style pour le bouton
+        style = ttk.Style()
+        style.configure("Accent.TButton", font=('Arial', 12, 'bold'))
+    
+    def creer_onglet_resultats(self, parent):
+        """Crée l'onglet d'affichage des résultats"""
+        self.texte_resultats = scrolledtext.ScrolledText(parent, height=30, width=90, 
+                                                         font=('Courier', 10))
+        self.texte_resultats.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Boutons pour les résultats
+        cadre_boutons = ttk.Frame(parent)
+        cadre_boutons.pack(pady=5)
+        
+        ttk.Button(cadre_boutons, text="💾 Sauvegarder les résultats", 
+                  command=self.sauvegarder_resultats).pack(side=tk.LEFT, padx=5)
+        ttk.Button(cadre_boutons, text="🖨️ Copier dans le presse-papier", 
+                  command=self.copier_resultats).pack(side=tk.LEFT, padx=5)
+    
+    def ajouter_contrainte(self):
+        """Ouvre une fenêtre pour ajouter une contrainte"""
+        fenetre = tk.Toplevel(self.root)
+        fenetre.title("Ajouter une contrainte")
+        fenetre.geometry("500x250")
+        
+        ttk.Label(fenetre, text="Entrez votre contrainte:", 
+                 font=('Arial', 11, 'bold')).pack(pady=10)
+        
+        ttk.Label(fenetre, text="Exemples:", foreground="gray").pack()
+        ttk.Label(fenetre, text="• 2*x1 + 3*x2 ≤ 10", foreground="gray").pack()
+        ttk.Label(fenetre, text="• x1 - x2 ≥ 5", foreground="gray").pack()
+        ttk.Label(fenetre, text="• 2*x1 = 8", foreground="gray").pack()
+        
+        entree = ttk.Entry(fenetre, width=50)
+        entree.pack(pady=15)
+        entree.focus()
+        
+        def ajouter():
+            contrainte = entree.get().strip()
+            if contrainte:
+                texte_actuel = self.texte_contraintes.get(1.0, tk.END)
+                if texte_actuel.strip():
+                    self.texte_contraintes.insert(tk.END, "\n" + contrainte)
+                else:
+                    self.texte_contraintes.insert(tk.END, contrainte)
+                fenetre.destroy()
+            else:
+                messagebox.showwarning("Attention", "Veuillez entrer une contrainte")
+        
+        ttk.Button(fenetre, text="Ajouter", command=ajouter).pack(pady=10)
+    
+    def effacer_contraintes(self):
+        """Efface toutes les contraintes"""
+        self.texte_contraintes.delete(1.0, tk.END)
+    
+    def charger_exemple(self):
+        """Charge un exemple de problème"""
+        self.entree_objectif.delete(0, tk.END)
+        self.entree_objectif.insert(0, "5*x1 + 4*x2 + 3*x3")
+        
+        self.entree_point_initial.delete(0, tk.END)
+        self.entree_point_initial.insert(0, "x1=0, x2=0, x3=0")
+    

@@ -1,104 +1,289 @@
-from maths import MatrixOps
-from constraints import ConstraintOps
-import math
 
-class GradientAlgorithm(MatrixOps, ConstraintOps):
+"""
+Module algorithm - Algorithme du gradient projeté
+------------------------------------------------
+Contient l'implémentation principale de la méthode du gradient projeté
+pour l'optimisation linéaire sous contraintes.
+"""
+
+import numpy as np
+from src.utils import Utils
+from src.constraints import ConstraintManager
+from src.maths import MatrixOperations
+
+
+class ProblemeLineaire:
+    """
+    Classe pour représenter un problème d'optimisation linéaire
+    """
+    
     def __init__(self):
-        self.x_current=None
-        self.history_x=[]
-        self.history_f=[]
-
-    # Évaluation fonction objectif
-    def evaluate_function(self, func_str, x, y):
+        """Initialise un problème linéaire vide"""
+        self.fonction_objectif = {}
+        self.nom_variables = []
+        self.gradient = None
+        self.point_initial = None
+        self.solution = None
+        self.constraint_manager = None
+    
+    def ajouter_fonction_objectif(self, expression):
+        """
+        Ajoute la fonction objectif à maximiser
+        
+        Entrée:
+            expression: str - expression linéaire comme "3*x1 + 2*x2"
+        """
+        self.fonction_objectif = Utils.parser_expression(expression)
+        self.nom_variables = sorted(Utils.extraire_noms_variables(expression))
+        
+        # Initialiser le gestionnaire de contraintes
+        self.constraint_manager = ConstraintManager(self.nom_variables)
+    
+    def ajouter_contrainte(self, expression):
+        """
+        Ajoute une contrainte au problème
+        
+        Entrée:
+            expression: str - contrainte comme "2*x1 + x2 <= 10"
+        """
+        self.constraint_manager.ajouter_contrainte(expression)
+        # Mettre à jour les noms des variables
+        self.nom_variables = sorted(self.constraint_manager.var_names)
+    
+    def definir_gradient(self, gradient_str):
+        """
+        Définit le gradient à partir d'une chaîne
+        
+        Entrée:
+            gradient_str: str - gradient comme "3, 2" ou "3*x1 + 2*x2"
+        Sortie:
+            bool - True si le gradient a été défini avec succès
+        """
         try:
-            expr = func_str.replace('x',str(x)).replace('y',str(y))
-            return eval(expr)
+            if ',' in gradient_str:
+                # Format simple: "3, 2, 5"
+                valeurs = [float(v.strip()) for v in gradient_str.split(',')]
+                n = len(self.nom_variables)
+                self.gradient = np.zeros(n)
+                for i in range(min(len(valeurs), n)):
+                    self.gradient[i] = valeurs[i]
+            else:
+                # Format avec variables: "3*x1 + 2*x2"
+                coeffs = Utils.parser_expression(gradient_str)
+                n = len(self.nom_variables)
+                self.gradient = np.zeros(n)
+                for var, coeff in coeffs.items():
+                    if var in self.nom_variables:
+                        idx = self.nom_variables.index(var)
+                        self.gradient[idx] = coeff
+            return True
         except:
-            return float('inf')
+            return False
+    
+    def definir_point_initial(self, point_str):
+        """
+        Définit le point initial
+        
+        Entrée:
+            point_str: str - point initial comme "x1=1, x2=2" ou "1,2"
+        """
+        self.point_initial = Utils.parse_point(point_str, self.nom_variables)
+        return True
+    
+    def calculer_valeur_objectif(self, x=None):
+        """
+        Calcule la valeur de la fonction objectif
+        
+        Entrée:
+            x: np.ndarray - point d'évaluation (si None, utilise la solution)
+        Sortie:
+            float - valeur de la fonction objectif
+        """
+        if x is None:
+            if self.solution is None:
+                return None
+            x = self.solution
+        
+        valeur = 0.0
+        for var, coeff in self.fonction_objectif.items():
+            if var in self.nom_variables:
+                idx = self.nom_variables.index(var)
+                valeur += coeff * x[idx]
+        return valeur
+    
+    def calculer_gradient_au_point(self, x):
+        """
+        Calcule le gradient au point x (pour l'optimisation linéaire, constant)
+        
+        Entrée:
+            x: np.ndarray - point d'évaluation
+        Sortie:
+            np.ndarray - gradient
+        """
+        if self.gradient is not None:
+            return self.gradient.copy()
+        
+        grad = np.zeros(len(self.nom_variables))
+        for var, coeff in self.fonction_objectif.items():
+            if var in self.nom_variables:
+                idx = self.nom_variables.index(var)
+                grad[idx] = coeff
+        return grad
+    
+    def verifier_contraintes(self, x=None):
+        """
+        Vérifie si le point x satisfait toutes les contraintes
+        
+        Entrée:
+            x: np.ndarray - point à vérifier (si None, utilise la solution)
+        Sortie:
+            bool - True si les contraintes sont satisfaites
+        """
+        if x is None:
+            if self.solution is None:
+                return False
+            x = self.solution
+        return self.constraint_manager.verifier_contraintes(x)
+    
+    def gradient_projete(self, max_iterations=1000, pas_initial=0.1,
+                        tolerance=1e-6, pas_min=1e-8, backtracking=False):
+        """
+        Résout le problème par la méthode du gradient projeté
+        
+        Entrée:
+            max_iterations: int - nombre maximum d'itérations
+            pas_initial: float - pas initial
+            tolerance: float - tolérance de convergence
+            pas_min: float - pas minimum
+            backtracking: bool - utiliser la recherche linéaire
+        Sortie:
+            tuple - (solution, historique_x, historique_f)
+        """
+        n = len(self.nom_variables)
+        
+        # Point initial
+        if self.point_initial is not None:
+            x = np.array(self.point_initial)
+        else:
+            x = np.zeros(n)
+        
+        # Projection sur les contraintes
+        x = self.constraint_manager.projeter(x)
+        
+        # Gradient
+        grad = self.calculer_gradient_au_point(x)
+        
+        # Historique
+        historique_x = [x.copy()]
+        historique_f = [self.calculer_valeur_objectif(x)]
+        
+        pas = pas_initial
+        iteration = 0
+        
+        for iteration in range(max_iterations):
+            x_ancien = x.copy()
+            
+            if backtracking:
+                # Recherche linéaire avec backtracking
+                pas_actuel = pas
+                for _ in range(20):
+                    x_test = x_ancien + pas_actuel * grad
+                    x_test = self.constraint_manager.projeter(x_test)
+                    
+                    f_test = self.calculer_valeur_objectif(x_test)
+                    f_ancien = self.calculer_valeur_objectif(x_ancien)
+                    
+                    if f_test > f_ancien - 1e-8:
+                        x = x_test
+                        break
+                    pas_actuel *= 0.5
+                else:
+                    x = x_test
+            else:
+                # Pas fixe
+                x = x_ancien + pas * grad
+                x = self.constraint_manager.projeter(x)
+            
+            # Vérifier la convergence
+            diff = np.linalg.norm(x - x_ancien)
+            if diff < tolerance:
+                break
+            
+            historique_x.append(x.copy())
+            historique_f.append(self.calculer_valeur_objectif(x))
+            
+            # Ajustement adaptatif du pas
+            if not backtracking and iteration % 50 == 0:
+                pas = max(pas * 0.95, pas_min)
+        
+        self.solution = x
+        return x, historique_x, historique_f
+    
+    def afficher_solution(self):
+        """
+        Retourne une chaîne de caractères avec la solution détaillée
+        
+        Sortie:
+            str - solution formatée
+        """
+        if self.solution is None:
+            return "Aucune solution trouvée"
+        
+        resultat = "=" * 60 + "\n"
+        resultat += " " * 20 + "SOLUTION OPTIMALE\n"
+        resultat += "=" * 60 + "\n\n"
+        
+        resultat += "VARIABLES DÉCISIONNELLES:\n"
+        resultat += "-" * 40 + "\n"
+        for i, nom in enumerate(self.nom_variables):
+            resultat += f"  {nom:8} = {self.solution[i]:.8f}\n"
+        
+        resultat += f"\nVALEUR DE LA FONCTION OBJECTIF:\n"
+        resultat += "-" * 40 + "\n"
+        resultat += f"  f(x) = {self.calculer_valeur_objectif():.8f}\n"
+        
+        # Vérification des contraintes
+        resultat += f"\nVÉRIFICATION DES CONTRAINTES:\n"
+        resultat += "-" * 40 + "\n"
+        
+        A_eq, b_eq, A_ineq, b_ineq = self.constraint_manager.construire_matrices()
+        
+        if A_eq is not None and len(A_eq) > 0:
+            resultat += "\nContraintes d'égalité:\n"
+            for i, (a, b) in enumerate(zip(A_eq, b_eq)):
+                valeur = np.dot(a, self.solution)
+                statut = "✓" if abs(valeur - b) < 1e-6 else "✗"
+                resultat += f"  {statut} Contrainte {i+1}: {valeur:.8f} = {b:.8f}\n"
+        
+        if A_ineq is not None and len(A_ineq) > 0:
+            resultat += "\nContraintes d'inégalité:\n"
+            for i, (a, b) in enumerate(zip(A_ineq, b_ineq)):
+                valeur = np.dot(a, self.solution)
+                statut = "✓" if valeur <= b + 1e-6 else "✗"
+                resultat += f"  {statut} Contrainte {i+1}: {valeur:.8f} ≤ {b:.8f}\n"
+        
+        return resultat
 
-    # Gradient numérique ou fourni
-    def gradient(self, grad_str, point):
-        if grad_str.strip():
-            try:
-                grad_parts=grad_str.split(',')
-                df_dx_str=grad_parts[0].strip()
-                df_dy_str=grad_parts[1].strip()
-                grad_x=self.evaluate_function(df_dx_str,point[0],point[1])
-                grad_y=self.evaluate_function(df_dy_str,point[0],point[1])
-                return [grad_x,grad_y]
-            except:
-                pass
-        return self.numerical_gradient(point, self.f_entry.get())
 
-    def numerical_gradient(self, point, f_str, epsilon=1e-6):
-        f0=self.evaluate_function(f_str, point[0], point[1])
-        f_x=self.evaluate_function(f_str, point[0]+epsilon, point[1])
-        grad_x=(f_x-f0)/epsilon
-        f_y=self.evaluate_function(f_str, point[0], point[1]+epsilon)
-        grad_y=(f_y-f0)/epsilon
-        return [grad_x, grad_y]
-
-    # Exécution algorithme complet
-    def run_algorithm(self, f_entry, grad_entry, x0_entry, lambda_entry,
-                      max_iter_entry, tol_entry, constraints_text, result_text):
-        try:
-            self.f_entry=f_entry
-            self.lambda_entry=lambda_entry
-            x0_str=x0_entry.get()
-            x0=[float(i) for i in x0_str.split(',')]
-            self.x_current=x0.copy()
-            self.history_x=[x0.copy()]
-            f_str=f_entry.get()
-            grad_str=grad_entry.get()
-            constraints=self.parse_constraints(constraints_text)
-            f_current=self.evaluate_function(f_str, x0[0], x0[1])
-            self.history_f=[f_current]
-            result_text.delete("1.0","end")
-            if not self.check_feasibility(self.x_current,constraints):
-                self.x_current=self.projection_simple(self.x_current,constraints)
-            lambda_star=float(lambda_entry.get())
-            tol=float(tol_entry.get())
-            max_iter=int(max_iter_entry.get())
-            for iteration in range(max_iter):
-                grad=self.gradient(grad_str,self.x_current)
-                active_idx, active_grads=self.active_constraints(self.x_current,constraints)
-                P=self.projection_matrix(active_grads)
-                P_grad=self.mat_vec_mul(P,grad)
-                norm_Pg=math.sqrt(P_grad[0]**2+P_grad[1]**2)
-                if norm_Pg<tol and not active_idx:
-                    result_text.insert("end",f"✓ Solution optimale trouvée à l'itération {iteration}\n")
-                    break
-                direction=[-P_grad[0],-P_grad[1]]
-                if math.sqrt(direction[0]**2+direction[1]**2)<tol:
-                    direction=[-grad[0],-grad[1]]
-                lambda_star=self.compute_step(self.x_current,direction,constraints,active_idx)
-                x_new=[self.x_current[0]+lambda_star*direction[0],
-                       self.x_current[1]+lambda_star*direction[1]]
-                if not self.check_feasibility(x_new,constraints):
-                    x_new=self.projection_simple(x_new,constraints)
-                f_new=self.evaluate_function(f_str,x_new[0],x_new[1])
-                result_text.insert("end",f"Itération {iteration:2d}: x={[f'{x_new[0]:.6f}',f'{x_new[1]:.6f}']}, f={f_new:.6f}\n")
-                step_norm=math.sqrt((x_new[0]-self.x_current[0])**2+(x_new[1]-self.x_current[1])**2)
-                if step_norm<tol:
-                    self.x_current=x_new
-                    break
-                self.x_current=x_new
-                f_current=f_new
-                self.history_x.append(self.x_current.copy())
-                self.history_f.append(f_current)
-            result_text.insert("end","\n"+"="*60+"\n")
-            result_text.insert("end",f"Solution finale: x* = {self.x_current}\n")
-            result_text.insert("end",f"Valeur optimale: f* = {self.history_f[-1]:.6f}\n")
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-
-    def reset_ui(self,f_entry,grad_entry,x0_entry,constraints_text,result_text):
-        f_entry.delete(0,'end');f_entry.insert(0,"x**2 + y**2")
-        grad_entry.delete(0,'end');grad_entry.insert(0,"2*x, 2*y")
-        x0_entry.delete(0,'end');x0_entry.insert(0,"1.0, 1.0")
-        constraints_text.delete("1.0",'end');constraints_text.insert("1.0","x + y <= 2\nx >= 0\ny >= 0")
-        result_text.delete("1.0",'end')
-        self.x_current=None
-        self.history_x=[]
-        self.history_f=[]
+class GradientProjete:
+    """
+    Classe wrapper pour l'algorithme du gradient projeté
+    """
+    
+    def __init__(self, fonction_objectif=None, contraintes=None):
+        """
+        Initialise l'algorithme
+        
+        Entrée:
+            fonction_objectif: str - expression de la fonction objectif
+            contraintes: list[str] - liste des contraintes
+        """
+        self.probleme = ProblemeLineaire()
+        if fonction_objectif:
+            self.probleme.ajouter_fonction_objectif(fonction_objectif)
+        if contraintes:
+            for c in contraintes:
+                self.probleme.ajouter_contrainte(c)
+    
+    def resoudre(self, point_initial=None, gradient=None, 
+                max_iterations=1000, pas_init

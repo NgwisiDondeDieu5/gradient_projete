@@ -1,81 +1,146 @@
 
-from maths import MatrixOps
+"""
+Module constraints - Gestion des contraintes
+-------------------------------------------
+Contient les fonctions pour parser, évaluer et vérifier les contraintes.
+"""
 
-class ConstraintOps(MatrixOps):
-    # Parse les contraintes depuis le texte
-    def parse_constraints(self, constraints_text_widget):
-        constraints_text = constraints_text_widget.get("1.0", 'end').strip().split('\n')
-        return [c.strip() for c in constraints_text if c.strip()]
+import re
+import numpy as np
+from src.utils import Utils
 
-    # Convertit en h(x,y)<=0
-    def constraint_expr(self, constraint):
-        if '<=' in constraint:
-            left,right = constraint.split('<=')
-            return f"({left.strip()}) - ({right.strip()})"
-        elif '>=' in constraint:
-            left,right = constraint.split('>=')
-            return f"({right.strip()}) - ({left.strip()})"
-        else:
-            return constraint
 
-    # Évaluation d'une contrainte
-    def eval_constraint(self, expr, point):
-        x,y = point
-        return eval(expr.replace('x',str(x)).replace('y',str(y)))
-
-    # Vérification faisabilité
-    def check_feasibility(self, point, constraints):
-        for c in constraints:
-            expr = self.constraint_expr(c)
-            try:
-                val = self.eval_constraint(expr, point)
-                if val > 1e-10:
-                    return False
-            except:
+class ConstraintManager:
+    """Classe pour la gestion des contraintes"""
+    
+    OPERATORS = ['<=', '>=', '=', '<', '>']
+    
+    def __init__(self, var_names):
+        """
+        Initialise le gestionnaire de contraintes
+        
+        Entrée:
+            var_names: list[str] - noms des variables
+        """
+        self.var_names = var_names
+        self.constraints = []
+    
+    def ajouter_contrainte(self, expression):
+        """
+        Ajoute une contrainte à partir d'une expression
+        
+        Entrée:
+            expression: str - contrainte comme "2*x1 + x2 <= 10"
+        """
+        expression = expression.replace('≥', '>=').replace('≤', '<=')
+        
+        operator = None
+        partie_gauche = None
+        partie_droite = None
+        
+        for op in self.OPERATORS:
+            if op in expression:
+                operator = op
+                parties = expression.split(op)
+                partie_gauche = parties[0].strip()
+                partie_droite = float(parties[1].strip())
+                break
+                
+        if operator is None:
+            raise ValueError(f"Format de contrainte invalide: {expression}")
+        
+        coefficients = Utils.parser_expression(partie_gauche)
+        
+        # Convertir en vecteur de coefficients
+        n = len(self.var_names)
+        vecteur = np.zeros(n)
+        for var, coeff in coefficients.items():
+            if var in self.var_names:
+                idx = self.var_names.index(var)
+                vecteur[idx] = coeff
+        
+        self.constraints.append({
+            'vecteur': vecteur,
+            'type': operator,
+            'borne': partie_droite
+        })
+        
+        # Ajouter les nouvelles variables si nécessaire
+        nouvelles_vars = Utils.extraire_noms_variables(partie_gauche)
+        for var in nouvelles_vars:
+            if var not in self.var_names:
+                self.var_names.append(var)
+        
+        return self.constraints[-1]
+    
+    def construire_matrices(self):
+        """
+        Construit les matrices A_eq, b_eq, A_ineq, b_ineq
+        
+        Sortie:
+            tuple - (A_eq, b_eq, A_ineq, b_ineq)
+        """
+        A_eq = []
+        b_eq = []
+        A_ineq = []
+        b_ineq = []
+        
+        for c in self.constraints:
+            vecteur = c['vecteur']
+            
+            if c['type'] == '=':
+                A_eq.append(vecteur)
+                b_eq.append(c['borne'])
+            elif c['type'] == '<=':
+                A_ineq.append(vecteur)
+                b_ineq.append(c['borne'])
+            elif c['type'] == '<':
+                A_ineq.append(vecteur)
+                b_ineq.append(c['borne'] - 1e-8)
+            elif c['type'] == '>=':
+                A_ineq.append(-vecteur)
+                b_ineq.append(-c['borne'])
+            elif c['type'] == '>':
+                A_ineq.append(-vecteur)
+                b_ineq.append(-c['borne'] - 1e-8)
+        
+        A_eq = np.array(A_eq) if A_eq else None
+        b_eq = np.array(b_eq) if b_eq else None
+        A_ineq = np.array(A_ineq) if A_ineq else None
+        b_ineq = np.array(b_ineq) if b_ineq else None
+        
+        return A_eq, b_eq, A_ineq, b_ineq
+    
+    def verifier_contraintes(self, x):
+        """
+        Vérifie si le point x satisfait toutes les contraintes
+        
+        Entrée:
+            x: np.ndarray - point à vérifier
+        Sortie:
+            bool - True si toutes les contraintes sont satisfaites
+        """
+        A_eq, b_eq, A_ineq, b_ineq = self.construire_matrices()
+        
+        if A_eq is not None:
+            if not np.allclose(A_eq @ x, b_eq, rtol=1e-6):
                 return False
+        
+        if A_ineq is not None:
+            if np.any(A_ineq @ x - b_ineq > 1e-6):
+                return False
+        
         return True
-
-    # Gradient numérique contrainte
-    def constraint_gradient(self, expr, point, epsilon=1e-6):
-        f0 = self.eval_constraint(expr, point)
-        grad_x = (self.eval_constraint(expr, [point[0]+epsilon, point[1]])-f0)/epsilon
-        grad_y = (self.eval_constraint(expr, [point[0], point[1]+epsilon])-f0)/epsilon
-        return [grad_x, grad_y]
-
-    # Liste contraintes actives
-    def active_constraints(self, point, constraints):
-        active_idx=[]
-        active_grads=[]
-        for i,c in enumerate(constraints):
-            expr=self.constraint_expr(c)
-            try:
-                val = self.eval_constraint(expr, point)
-                if abs(val)<1e-8:
-                    active_idx.append(i)
-                    active_grads.append(self.constraint_gradient(expr, point))
-            except:
-                pass
-        return active_idx, active_grads
-
-    # Matrice de projection
-    def projection_matrix(self, A):
-        if not A:
-            return [[1.0,0.0],[0.0,1.0]]
-        m=len(A)
-        n=2
-        AAT=[[sum(A[i][k]*A[j][k] for k in range(n)) for j in range(m)] for i in range(m)]
-        if m==1:
-            invAAT=[[1.0/AAT[0][0]]] if abs(AAT[0][0])>1e-12 else None
-        elif m==2:
-            try:
-                invAAT=self.inv2(AAT)
-            except:
-                invAAT=None
-        else:
-            return [[1.0,0.0],[0.0,1.0]]
-        if invAAT is None:
-            return [[1.0,0.0],[0.0,1.0]]
-        AT=self.transpose(A)
-        AT_inv=[[sum(AT[i][k]*invAAT[k][j] for k in range(m)) for j in range(m)] for i in range(n)]
-        P_bar=[[sum(AT_inv[i][k]*A[k][j] for k in range(m)) for j in range(n)] for i in range(n)]
-        return [[1.0-P_bar[0][0],-P_bar[0][1]],[-P_bar[1][0],1.0-P_bar[1][1]]]
+    
+    def projeter(self, x):
+        """
+        Projette le point x sur l'ensemble des contraintes
+        
+        Entrée:
+            x: np.ndarray - point à projeter
+        Sortie:
+            np.ndarray - point projeté
+        """
+        from src.maths import MatrixOperations
+        A_eq, b_eq, A_ineq, b_ineq = self.construire_matrices()
+        return MatrixOperations.projeter_sur_contraintes(x, A_eq, b_eq, A_ineq, b_ineq)

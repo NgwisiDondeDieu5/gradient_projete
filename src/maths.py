@@ -1,49 +1,90 @@
 
-import math
+"""
+Module maths - Opérations mathématiques et matricielles
+------------------------------------------------------
+Contient les fonctions pour les calculs matriciels et l'algèbre linéaire.
+"""
 
-class MatrixOps:
-    # Produit matrice-vecteur
-    def mat_vec_mul(self, M, v):
-        n = len(M)
-        res = [0.0]*n
-        for i in range(n):
-            for j in range(n):
-                res[i] += M[i][j] * v[j]
-        return res
+import numpy as np
 
-    # Produit matrice-matrice
-    def mat_mat_mul(self, A, B):
-        n = len(A)
-        res = [[0.0]*n for _ in range(n)]
-        for i in range(n):
-            for j in range(n):
-                s = 0.0
-                for k in range(n):
-                    s += A[i][k]*B[k][j]
-                res[i][j] = s
-        return res
 
-    # Transposée
-    def transpose(self, A):
-        n = len(A)
-        m = len(A[0]) if n>0 else 0
-        return [[A[j][i] for j in range(n)] for i in range(m)]
-
-    # Déterminant 2x2
-    def det2(self, a,b,c,d):
-        return a*d - b*c
-
-    # Inverse 2x2
-    def inv2(self, M):
-        a,b,c,d = M[0][0], M[0][1], M[1][0], M[1][1]
-        det = self.det2(a,b,c,d)
-        if abs(det) < 1e-12:
-            raise ValueError("Matrice singulière")
-        inv_det = 1.0 / det
-        return [[d*inv_det, -b*inv_det],
-                [-c*inv_det, a*inv_det]]
-
-    # Résolution Ax=b 2x2
-    def solve_2x2(self, A, b):
-        invA = self.inv2(A)
-        return self.mat_vec_mul(invA, b)
+class MatrixOperations:
+    """Classe pour les opérations matricielles"""
+    
+    @staticmethod
+    def mat_vec_mul(M, v):
+        """
+        Produit matrice-vecteur (M de taille n×n, v de taille n)
+        
+        Entrée:
+            M: list[list[float]] ou np.ndarray - matrice carrée
+            v: list[float] ou np.ndarray - vecteur
+        Sortie:
+            np.ndarray - résultat du produit
+        """
+        M = np.array(M)
+        v = np.array(v)
+        return M @ v
+    
+    @staticmethod
+    def mat_mat_mul(A, B):
+        """
+        Produit de deux matrices
+        
+        Entrée:
+            A, B: np.ndarray - matrices
+        Sortie:
+            np.ndarray - produit A @ B
+        """
+        return np.array(A) @ np.array(B)
+    
+    @staticmethod
+    def transpose(A):
+        """Transposée d'une matrice"""
+        return np.array(A).T
+    
+    @staticmethod
+    def identity(n):
+        """Matrice identité n x n"""
+        return np.eye(n)
+    
+    @staticmethod
+    def projeter_sur_contraintes(x, A_eq, b_eq, A_ineq, b_ineq):
+        """
+        Projette le point x sur l'intersection des contraintes
+        
+        Entrée:
+            x: np.ndarray - point à projeter
+            A_eq, b_eq: np.ndarray - contraintes d'égalité Ax = b
+            A_ineq, b_ineq: np.ndarray - contraintes d'inégalité Ax ≤ b
+        Sortie:
+            np.ndarray - point projeté
+        """
+        x = x.copy()
+        
+        # Projection sur les égalités
+        if A_eq is not None and len(A_eq) > 0:
+            try:
+                pinv = np.linalg.pinv(A_eq)
+                x = x - pinv @ (A_eq @ x - b_eq)
+            except np.linalg.LinAlgError:
+                pass
+        
+        # Projection sur les inégalités (méthode de projection successive)
+        if A_ineq is not None and len(A_ineq) > 0:
+            max_iter = 100
+            for _ in range(max_iter):
+                violations = A_ineq @ x - b_ineq
+                indices_violation = np.where(violations > 1e-8)[0]
+                
+                if len(indices_violation) == 0:
+                    break
+                
+                for idx in indices_violation:
+                    a = A_ineq[idx]
+                    b = b_ineq[idx]
+                    norm_a = np.dot(a, a)
+                    if norm_a > 1e-10:
+                        x = x - ((a @ x - b) / norm_a) * a
+        
+        return x
